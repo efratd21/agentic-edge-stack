@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets — commit .env.example, never .env
+.env
+
+# Claude Code project notes & local config — kept out of the public repo
+CLAUDE.md
+.claude/
