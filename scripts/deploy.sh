@@ -4,7 +4,7 @@
 #
 # Initializes the local inference server (Ollama) and pulls the models the
 # Agentic Edge Stack needs:
-#   - gemma3:1b         the chat / agent "brain"
+#   - llama3.2:3b       the chat / agent "brain" (tool-calling capable)
 #   - nomic-embed-text  the embedding model used by the in-memory RAG (Part 2)
 #
 # Designed for Ubuntu on WSL2. Idempotent — every step checks current state
@@ -26,7 +26,7 @@ if [[ -f .env ]]; then
   set -a; source .env; set +a
 fi
 OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
-LLM_MODEL="${MODEL_NAME:-gemma3:1b}"
+LLM_MODEL="${MODEL_NAME:-llama3.2:3b}"
 EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}"
 export OLLAMA_HOST   # the ollama CLI honors this for both `serve` and `pull`
 

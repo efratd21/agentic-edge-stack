@@ -36,7 +36,7 @@ every claim in this README can be reproduced from a clean checkout.
                        │
               ┌────────▼─────────┐
               │  Local LLM        │   Ollama (OpenAI-compatible) :11434
-              │  gemma3:1b        │   embeddings: nomic-embed-text
+              │  llama3.2:3b      │   embeddings: nomic-embed-text
               └──────────────────┘
 ```
 
@@ -50,7 +50,7 @@ The retrieval engine at the bottom (Part 2) is exposed to the agent as the
 | Concern | Choice | Why |
 |---|---|---|
 | Inference engine | **Ollama** | One-command model pull, OpenAI-compatible API, native tool-calling, serves both the LLM and the embedder from one stack. |
-| LLM | **`gemma3:1b`** | Lightweight, instruct-tuned, tool-calling capable; runs comfortably on the edge. |
+| LLM | **`llama3.2:3b`** | Lightweight, instruct-tuned, **tool-calling capable** (required by the Part 3 agent). See [why](#why-llama32-3b-for-the-agent). |
 | Embeddings | **`nomic-embed-text`** (via Ollama) | 768-dim, instruction-tuned. Served by the *same* Ollama engine as the LLM — no separate torch/HuggingFace stack at runtime. See [why](#why-nomic-embed-text-for-embeddings). |
 | Vector store | **FAISS** `IndexFlatIP` + L2-normalized vectors | In-memory, deterministic, zero external deps. Inner product over unit vectors == **cosine similarity**. |
 | Config | **pydantic-settings** + `.env` | No hardcoded hosts or magic numbers; every tunable is typed and overridable. |
@@ -85,9 +85,9 @@ pipeline applies automatically.
 
 ## Part 1 — Model Serving & Deployment
 
-The "brain" of the stack is a small instruct LLM served locally by **Ollama**,
-which serves the embedding model from the same engine. Two scripts cover bringing
-the server up and proving it answers.
+The "brain" of the stack is a lightweight instruct LLM (`llama3.2:3b`) served
+locally by **Ollama**, which serves the embedding model from the same engine. Two
+scripts cover bringing the server up and proving it answers.
 
 ### Environment & prerequisites
 
@@ -125,16 +125,16 @@ defaults). It is **idempotent** — safe to re-run.
 
 ```
 [deploy] Ollama host : http://localhost:11434
-[deploy] Chat model  : gemma3:1b
+[deploy] Chat model  : llama3.2:3b
 [deploy] Embed model : nomic-embed-text
 [deploy] Ollama already installed: ollama version is 0.30.11
 [deploy] Ollama server already responding at http://localhost:11434
-[deploy] Model already present: gemma3:1b
-[deploy] Model already present: nomic-embed-text
+[deploy] Pulling llama3.2:3b ...
+[deploy] Pulling nomic-embed-text ...
 [deploy] Done. Installed models:
-NAME                       ID              SIZE      MODIFIED
-nomic-embed-text:latest    0a109f422b47    274 MB    ...
-gemma3:1b                  8648f39daa8f    815 MB    ...
+NAME                       SIZE
+llama3.2:3b                ~2.0 GB
+nomic-embed-text:latest    274 MB
 
 Next: python scripts/verify.py
 ```
@@ -153,7 +153,7 @@ python scripts/verify.py
 
 ```
 [ok]   server reachable at http://localhost:11434; 2 model(s) available
-[ok]   chat model 'gemma3:1b' responded: 'Hello there! 😊'
+[ok]   chat model 'llama3.2:3b' responded: '<a one-line greeting>'
 [ok]   embedder 'nomic-embed-text' responded: 768-dim vector
 
 All checks passed — Part 1 endpoint is healthy.
@@ -161,8 +161,8 @@ All checks passed — Part 1 endpoint is healthy.
 
 <sub>Only the chat "Hello World" is strictly required by Part 1; the embedder
 check is added because `deploy.sh` pulls both models and Part 2 depends on the
-embedder. The chat wording varies between runs — generation is
-non-deterministic.</sub>
+embedder. The greeting is shown as a placeholder because generation is
+non-deterministic — the real string is printed on each run.</sub>
 
 ---
 
@@ -265,6 +265,126 @@ prefixes are being applied.</sub>
 
 ---
 
+## Part 3 — The Agentic Orchestrator
+
+The RAG flow from Part 2 is wrapped as a single tool, `rag_search`, that an
+autonomous agent can **choose** to call. The agent is a small, explicit
+**LangGraph** graph, kept minimal so the control flow is readable at a glance:
+
+```
+        START → agent ──(tool_calls?)──► tools ──┐
+                  ▲                               │
+                  └───────────────────────────────┘
+                  │
+                  └──(no tool_calls)──► END
+```
+
+The conditional edge after `agent` **is** the "use a tool vs. answer directly"
+decision the assignment asks for: if the model emitted tool calls, execute them
+and loop back; otherwise end with the answer. A recursion limit bounds the loop.
+
+Code: [`src/agent.py`](src/agent.py) (graph + trace), [`src/tools.py`](src/tools.py)
+(`rag_search`), [`src/llm.py`](src/llm.py) (model wrapper).
+
+### Why LangGraph (and not a hand-rolled loop or LangChain)
+
+The assignment lists *"LangChain or LangGraph (or build a native loop)"*. We chose
+**LangGraph**: a conditional-edge graph is the most readable expression of this
+exact tool-vs-direct decision, and LangGraph is the current standard for agentic
+orchestration (LangChain's `AgentExecutor` is legacy). The graph is deliberately
+minimal — for a single tool it stays a few nodes — so it does not hide control
+flow behind framework magic.
+
+### Why `llama3.2:3b` for the agent
+
+The agent needs **native tool-calling**. `gemma3:1b` does not support tools in
+Ollama (the server returns `400 ... does not support tools`), so the chat model
+is **`llama3.2:3b`** — listed in the assignment's Part 1 model options and
+tool-capable. Only `MODEL_NAME` changes; the graph, tool and embedder are
+unchanged.
+
+### The tool and the fallback
+
+`rag_search`'s description names the corpus domain (AI agents) so the model uses
+it for in-domain questions and skips it for general ones. A relevance threshold
+(top-1 cosine `< 0.6`, chosen from the 0.81-vs-0.48 gap measured in Part 2) turns
+a weak hit into the sentinel `NO_RELEVANT_CONTEXT`, so the agent falls back to a
+direct answer instead of grounding on an irrelevant chunk.
+
+### Running it
+
+```bash
+python -m src.agent "What is the ReAct pattern in AI agents?"   # → calls rag_search
+python -m src.agent "What is the capital of France?"            # → answers directly
+```
+
+Every decision and tool I/O is written to `logs/agent_trace.log` — the
+interaction-trace deliverable — showing the tool invoked (with input/output) for
+the knowledge question and skipped for the general one.
+
+### Routing test
+
+[`tests/test_agent_routing.py`](tests/test_agent_routing.py) verifies **both**
+branches deterministically using a stubbed chat model and the *real* retrieval
+tool, so the graph wiring is tested independently of the (non-deterministic)
+model:
+
+```
+[ok] knowledge Q invoked the tool
+[ok] knowledge Q answer is grounded
+[ok] general Q skipped the tool
+[ok] general Q answered directly
+[ok] general Q did NOT call the tool
+```
+
+---
+
+## Part 4 — API Serving & Streaming
+
+[`src/api.py`](src/api.py) wraps the agent in a FastAPI app with a streaming
+`POST /chat` endpoint. The agent's answer is streamed **token-by-token** over
+Server-Sent Events, so the client sees it build up rather than waiting for the
+whole block; tool usage is streamed too, as distinct events.
+
+```bash
+uvicorn src.api:app --port 8000
+```
+```bash
+curl -N -X POST localhost:8000/chat -H 'content-type: application/json' \
+  -d '{"message":"What is the ReAct pattern in AI agents?"}'
+```
+
+Each SSE frame is a JSON event (the contract emitted by `stream_agent`):
+
+| Event | Meaning |
+|---|---|
+| `{"type":"tool_call","name":…,"args":{…}}` | the agent decided to search |
+| `{"type":"tool_result","name":…,"preview":…}` | the tool's output |
+| `{"type":"token","text":…}` | one chunk of the final answer |
+| `[DONE]` | end of stream |
+
+### Streaming is real, not buffer-then-flush
+
+Under the hood, [`src/agent.py`](src/agent.py)'s `stream_agent` uses LangGraph's
+dual stream (`stream_mode=["updates","messages"]`) to yield node-level tool events
+and LLM token chunks **as they arrive**. This was verified by timing the arrival
+of each SSE frame through the streaming transport
+([`tests/stream_smoke.py`](tests/stream_smoke.py)):
+
+```
++ 1747.3 ms   data: {"type":"token","text":"Here"}     ← first token (model latency)
++ 1809.2 ms   data: {"type":"token","text":" are"}      Δ  62 ms
++ 1836.3 ms   data: {"type":"token","text":" two"}      Δ  27 ms
+   ... ~40 frames, each ~55 ms apart ...
++ 4013.7 ms   data: [DONE]
+```
+
+The steady ~55 ms gaps between frames are the signature of real streaming; a
+buffer-then-flush implementation would instead show one long pause and then every
+frame at once.
+
+---
+
 ## Repository layout
 
 ```
@@ -279,7 +399,15 @@ agentic-edge-stack/
 │   └── corpus/               # Part 2 dataset (AI-agents corpus, ~1,800 words)
 ├── src/
 │   ├── config.py             # pydantic-settings configuration
-│   └── rag.py                # Part 2: load → chunk → embed → FAISS → search + CLI
+│   ├── rag.py                # Part 2: load → chunk → embed → FAISS → search + CLI
+│   ├── tools.py              # Part 3: rag_search tool (+ relevance fallback)
+│   ├── llm.py                # Part 3/4: ChatOllama wrapper from config
+│   ├── agent.py              # Part 3: LangGraph tool-calling agent + trace
+│   └── api.py                # Part 4: FastAPI /chat with SSE streaming
+├── tests/
+│   ├── test_agent_routing.py # Part 3: routing test (stub model, real tool)
+│   └── stream_smoke.py       # Part 4: SSE streaming transport smoke test
 └── logs/
-    └── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
+    ├── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
+    └── agent_trace.log       # Part 3 deliverable: agent interaction trace
 ```
