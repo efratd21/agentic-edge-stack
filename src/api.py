@@ -15,9 +15,10 @@ Verify (tokens should trickle in, not arrive all at once):
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .agent import stream_agent
@@ -25,9 +26,17 @@ from .config import settings
 
 app = FastAPI(title="Agentic Edge Stack", version="0.1.0")
 
+_INDEX_HTML = Path(__file__).parent / "web" / "index.html"
+
 
 class ChatRequest(BaseModel):
     message: str
+
+
+@app.get("/")
+async def index() -> HTMLResponse:
+    """The chat web UI (talks to /chat over SSE)."""
+    return HTMLResponse(_INDEX_HTML.read_text(encoding="utf-8"))
 
 
 def format_sse(event: dict) -> str:

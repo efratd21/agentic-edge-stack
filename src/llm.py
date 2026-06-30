@@ -12,13 +12,15 @@ from langchain_ollama import ChatOllama
 from .config import settings
 
 
-def get_chat_model(*, temperature: float = 0.0, **kwargs) -> ChatOllama:
+def get_chat_model(*, model: str | None = None, temperature: float = 0.0, **kwargs) -> ChatOllama:
     """Build a ChatOllama pointed at the configured host/model.
 
-    temperature=0 by default for a deterministic, reproducible agent trace.
+    `model` overrides settings.model_name (used by the streaming demo to run a
+    model that is already pulled). temperature=0 by default for a deterministic,
+    reproducible agent trace.
     """
     return ChatOllama(
-        model=settings.model_name,
+        model=model or settings.model_name,
         base_url=settings.ollama_host,
         temperature=temperature,
         **kwargs,
