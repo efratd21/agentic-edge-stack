@@ -132,9 +132,9 @@ defaults). It is **idempotent** — safe to re-run.
 [deploy] Pulling llama3.2:3b ...
 [deploy] Pulling nomic-embed-text ...
 [deploy] Done. Installed models:
-NAME                       SIZE
-llama3.2:3b                ~2.0 GB
-nomic-embed-text:latest    274 MB
+NAME                       ID              SIZE      MODIFIED
+llama3.2:3b                a80c4f17acd5    2.0 GB    ...
+nomic-embed-text:latest    0a109f422b47    274 MB    ...
 
 Next: python scripts/verify.py
 ```
@@ -152,8 +152,8 @@ python scripts/verify.py
 ```
 
 ```
-[ok]   server reachable at http://localhost:11434; 2 model(s) available
-[ok]   chat model 'llama3.2:3b' responded: '<a one-line greeting>'
+[ok]   server reachable at http://localhost:11434; 3 model(s) available
+[ok]   chat model 'llama3.2:3b' responded: 'Hello!'
 [ok]   embedder 'nomic-embed-text' responded: 768-dim vector
 
 All checks passed — Part 1 endpoint is healthy.
@@ -161,8 +161,8 @@ All checks passed — Part 1 endpoint is healthy.
 
 <sub>Only the chat "Hello World" is strictly required by Part 1; the embedder
 check is added because `deploy.sh` pulls both models and Part 2 depends on the
-embedder. The greeting is shown as a placeholder because generation is
-non-deterministic — the real string is printed on each run.</sub>
+embedder. The greeting wording varies between runs — generation is
+non-deterministic.</sub>
 
 ---
 
@@ -305,22 +305,44 @@ unchanged.
 
 ### The tool and the fallback
 
-`rag_search`'s description names the corpus domain (AI agents) so the model uses
-it for in-domain questions and skips it for general ones. A relevance threshold
-(top-1 cosine `< 0.6`, chosen from the 0.81-vs-0.48 gap measured in Part 2) turns
-a weak hit into the sentinel `NO_RELEVANT_CONTEXT`, so the agent falls back to a
-direct answer instead of grounding on an irrelevant chunk.
+`rag_search`'s description names the corpus domain (AI agents) to steer the model
+toward using it for in-domain questions. But a small model is an imperfect router
+— in practice `llama3.2:3b` sometimes reaches for the tool even on a general
+question. That is exactly why there is a **second line of defence**: a relevance
+threshold (top-1 cosine `< 0.6`, chosen from the 0.81-vs-0.48 gap measured in
+Part 2) turns a weak hit into the sentinel `NO_RELEVANT_CONTEXT`, so the agent
+falls back to a direct answer instead of grounding on an irrelevant chunk. The
+trace below shows both layers at work.
 
 ### Running it
 
 ```bash
 python -m src.agent "What is the ReAct pattern in AI agents?"   # → calls rag_search
-python -m src.agent "What is the capital of France?"            # → answers directly
+python -m src.agent "What is the capital of France?"            # → falls back to a direct answer
 ```
 
-Every decision and tool I/O is written to `logs/agent_trace.log` — the
-interaction-trace deliverable — showing the tool invoked (with input/output) for
-the knowledge question and skipped for the general one.
+Every decision and tool I/O is written to
+[`logs/agent_trace.log`](logs/agent_trace.log) — the interaction-trace
+deliverable. The committed trace (abridged) shows both branches:
+
+```
+USER: What is the ReAct pattern in AI agents?
+  DECISION: call tool 'rag_search' args={'query': 'ReAct pattern in AI agents'}
+  TOOL 'rag_search' ... -> '[score=0.76] The most influential agent pattern is **ReAct** ...'
+  DECISION: answer directly -> 'The ReAct pattern in AI agents is a control flow that ...'
+FINAL: The ReAct pattern ... interleaves reasoning and action-taking. ...
+
+USER: What is the capital of France?
+  DECISION: call tool 'rag_search' args={'query': 'capital of France'}
+  TOOL 'rag_search' input={'query': 'capital of France'} -> 'NO_RELEVANT_CONTEXT'
+  DECISION: answer directly -> 'The capital of France is Paris.'
+FINAL: The capital of France is Paris.
+```
+
+For the general question the model *did* reach for the tool, but retrieval scored
+below threshold (`NO_RELEVANT_CONTEXT`) and the agent fell back to a direct,
+correct answer — both the tool decision and the relevance fallback visible in one
+trace.
 
 ### Routing test
 
@@ -363,6 +385,20 @@ Each SSE frame is a JSON event (the contract emitted by `stream_agent`):
 | `{"type":"token","text":…}` | one chunk of the final answer |
 | `[DONE]` | end of stream |
 
+A real `/chat` run is captured (abridged) in
+[`logs/chat_stream.log`](logs/chat_stream.log):
+
+```
+data: {"type": "tool_call", "name": "rag_search", "args": {"query": "tool calling in AI agents"}}
+data: {"type": "tool_result", "name": "rag_search", "preview": "[score=0.77] **Tool calling**, also called function calling, is the mechanism ..."}
+data: {"type": "token", "text": "Tool"}
+data: {"type": "token", "text": " calling"}
+data: {"type": "token", "text": " in"}
+    ... (token frames continue) ...
+data: {"type": "token", "text": "."}
+data: [DONE]
+```
+
 ### Streaming is real, not buffer-then-flush
 
 Under the hood, [`src/agent.py`](src/agent.py)'s `stream_agent` uses LangGraph's
@@ -382,6 +418,14 @@ of each SSE frame through the streaming transport
 The steady ~55 ms gaps between frames are the signature of real streaming; a
 buffer-then-flush implementation would instead show one long pause and then every
 frame at once.
+
+### Web UI
+
+A minimal chat page ([`src/web/index.html`](src/web/index.html)) is served at
+`GET /`, so the "production-ready web interface" is more than `curl`: open
+`http://localhost:8000` and the answer builds up token-by-token, with a chip
+appearing when the agent searches the knowledge base. It is a single self-contained
+file — no build step and no CDN, so it works offline behind the restricted network.
 
 ---
 
@@ -403,11 +447,13 @@ agentic-edge-stack/
 │   ├── tools.py              # Part 3: rag_search tool (+ relevance fallback)
 │   ├── llm.py                # Part 3/4: ChatOllama wrapper from config
 │   ├── agent.py              # Part 3: LangGraph tool-calling agent + trace
-│   └── api.py                # Part 4: FastAPI /chat with SSE streaming
+│   ├── api.py                # Part 4: FastAPI /chat (SSE) + web UI at /
+│   └── web/index.html        # Part 4: minimal streaming chat web UI
 ├── tests/
 │   ├── test_agent_routing.py # Part 3: routing test (stub model, real tool)
-│   └── stream_smoke.py       # Part 4: SSE streaming transport smoke test
+│   └── stream_smoke.py       # Part 4: SSE smoke test + live UI demo (gemma3:1b)
 └── logs/
     ├── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
-    └── agent_trace.log       # Part 3 deliverable: agent interaction trace
+    ├── agent_trace.log       # Part 3 deliverable: agent interaction trace
+    └── chat_stream.log       # Part 4 deliverable: captured /chat SSE stream
 ```

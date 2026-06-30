@@ -1,0 +1,22 @@
+data: {"type": "tool_call", "name": "rag_search", "args": {"query": "tool calling in AI agents"}}
+
+data: {"type": "tool_result", "name": "rag_search", "preview": "[score=0.77] **Tool calling**, also called function calling, is the mechanism by which an LLM\nrequests that the harness run a named function with structured arguments. It is\nwhat turns a text generato"}
+
+data: {"type": "token", "text": "Tool"}
+
+data: {"type": "token", "text": " calling"}
+
+data: {"type": "token", "text": " in"}
+
+data: {"type": "token", "text": " AI"}
+
+data: {"type": "token", "text": " agents"}
+
+data: {"type": "token", "text": " works"}
+
+    ... (token frames continue) ...
+
+data: {"type": "token", "text": "."}
+
+data: [DONE]
+

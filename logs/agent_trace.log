@@ -1,0 +1,21 @@
+2026-07-01 00:04:24,523 ======================================================================
+2026-07-01 00:04:24,523 USER: What is the ReAct pattern in AI agents?
+2026-07-01 00:05:33,331   DECISION: call tool 'rag_search' args={'query': 'ReAct pattern in AI agents'}
+2026-07-01 00:05:47,548   TOOL 'rag_search' input={'query': 'ReAct pattern in AI agents'} -> '[score=0.76] The most influential agent pattern is **ReAct** (Reasoning + Acting). The model interleaves *thoughts* (free-text reasoning about what to do next) '
+2026-07-01 00:07:09,551   DECISION: answer directly -> 'The ReAct pattern in AI agents is a control flow that interleaves reasoning and action-taking. It involves a loop where the agent model chooses an action (eithe'
+2026-07-01 00:07:09,736 FINAL: The ReAct pattern in AI agents is a control flow that interleaves reasoning and action-taking. It involves a loop where the agent model chooses an action (either calling a tool or providing a final answer) based on its goal, history, and available tools. The loop continues until the model decides the task is complete, with bounds to prevent infinite loops and handle tool errors.
+
+In ReAct, the model emits an action, the environment executes it and returns an observation, which is then fed back into the model for the next decision. This process allows the agent to adapt and learn from its interactions with the environment.
+
+The key benefits of ReAct include improved reliability due to the commitment to a rationale before acting, and easier debugging thanks to the exposed thought step. However, it also requires extra tokens compared to plain LLM calls.
+2026-07-01 00:08:39,591 ======================================================================
+2026-07-01 00:08:39,593 USER: What is the capital of France?
+2026-07-01 00:09:12,654   DECISION: call tool 'rag_search' args={'query': 'capital of France'}
+2026-07-01 00:09:23,669   TOOL 'rag_search' input={'query': 'capital of France'} -> 'NO_RELEVANT_CONTEXT'
+2026-07-01 00:09:26,799   DECISION: answer directly -> 'The capital of France is Paris.'
+2026-07-01 00:09:26,807 FINAL: The capital of France is Paris.
+2026-07-01 00:11:40,668 ======================================================================
+2026-07-01 00:11:40,669 USER (stream): How does tool calling work in AI agents?
+2026-07-01 00:12:05,866   DECISION: call tool 'rag_search' args={'query': 'tool calling in AI agents'}
+2026-07-01 00:12:22,667   TOOL 'rag_search' input={'query': 'tool calling in AI agents'} -> '[score=0.77] **Tool calling**, also called function calling, is the mechanism by which an LLM requests that the harness run a named function with structured arg'
+2026-07-01 00:13:31,324   DECISION: answer directly -> 'Tool calling in AI agents works by using a large language model (LLM) as the reasoning engine to decide which actions to take in order to accomplish a goal. The'
