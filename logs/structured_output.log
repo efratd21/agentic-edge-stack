@@ -1,0 +1,6 @@
+2026-07-01 21:24:44,070 MESSAGE: I love how the ReAct pattern lets an agent reason and call tools step by step!
+2026-07-01 21:24:44,115   SCHEMA-VALID JSON: {"topics":["react","pattern","agent","reasoning"],"sentiment":"positive"}
+2026-07-01 21:25:25,345 MESSAGE: What is the capital of France?
+2026-07-01 21:25:25,359   SCHEMA-VALID JSON: {"topics":["capital","france"],"sentiment":"neutral"}
+2026-07-01 21:26:10,272 MESSAGE: My RAG pipeline keeps returning irrelevant chunks and it is driving me crazy.
+2026-07-01 21:26:10,281   SCHEMA-VALID JSON: {"topics":["rag","pipeline","chunks"],"sentiment":"negative"}

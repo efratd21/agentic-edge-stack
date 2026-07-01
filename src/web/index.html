@@ -30,6 +30,13 @@
           border:1px solid var(--tool-border); border-radius:10px;
           padding:6px 10px; margin-bottom:8px; font-family: ui-monospace, monospace; }
   .tool .label { color:#7fd694; font-weight:600; }
+  .analysis { font-size:12.5px; color:var(--muted); display:flex; flex-wrap:wrap;
+              gap:6px; align-items:center; margin-bottom:8px; }
+  .analysis .chip { background:var(--panel); border:1px solid var(--border);
+                    border-radius:999px; padding:2px 9px; color:var(--text); }
+  .analysis .chip.pos { border-color:#2f7d43; color:#7fd694; }
+  .analysis .chip.neg { border-color:#8a3b3b; color:#f0a0a0; }
+  .analysis .k { color:var(--muted); }
   .cursor::after { content:"▋"; color:var(--muted); animation:blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity:0; } }
   footer { border-top:1px solid var(--border); padding:14px 20px;
@@ -94,6 +101,25 @@ function addTool(text) {
   log.scrollTop = log.scrollHeight;
 }
 
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function addAnalysis(topics, sentiment, before) {
+  const el = document.createElement('div');
+  el.className = 'analysis';
+  const cls = sentiment === 'positive' ? 'pos' : sentiment === 'negative' ? 'neg' : '';
+  const tags = (topics || []).map(t => '<span class="chip">' + esc(t) + '</span>').join('');
+  el.innerHTML = '<span class="k">topics</span> ' + tags +
+                 ' <span class="k">sentiment</span> ' +
+                 '<span class="chip ' + cls + '">' + esc(sentiment) + '</span>';
+  // Render the analysis just above the answer bubble it describes.
+  if (before) log.insertBefore(el, before); else log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+}
+
 async function ask(message) {
   addMsg('user').textContent = message;
   const bubble = addMsg('ai');
@@ -121,6 +147,8 @@ async function ask(message) {
       try { ev = JSON.parse(line); } catch { continue; }
       if (ev.type === 'token') {
         bubble.textContent += ev.text;
+      } else if (ev.type === 'analysis') {
+        addAnalysis(ev.topics, ev.sentiment, bubble.parentElement);
       } else if (ev.type === 'tool_call') {
         addTool('<span class="label">searched knowledge base</span> &middot; ' +
                 (ev.args && ev.args.query ? ev.args.query : ''));

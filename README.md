@@ -373,6 +373,7 @@ Each SSE frame is a JSON event (the contract emitted by `stream_agent`):
 
 | Event | Meaning |
 |---|---|
+| `{"type":"analysis","topics":[…],"sentiment":…}` | structured extraction (Bonus 1), emitted before the answer |
 | `{"type":"tool_call","name":…,"args":{…}}` | the agent decided to search |
 | `{"type":"tool_result","name":…,"preview":…}` | the tool's output |
 | `{"type":"token","text":…}` | one chunk of the final answer |
@@ -422,6 +423,57 @@ self-contained file — no build step and no CDN, so it works offline.
 
 ---
 
+## Bonus 1 — Structured Output Responses
+
+The agent can also emit **strict, schema-validated JSON** — here, the `{topics,
+sentiment}` of the user's message — alongside its natural-language answer.
+
+**How the schema is enforced.** [`src/schemas.py`](src/schemas.py) defines a
+Pydantic v2 model and hands it to `ChatOllama.with_structured_output(...)`, which
+uses Ollama's native **JSON-schema constrained decoding**: the model is *forced*
+to produce JSON matching the schema, and Pydantic validates it on the way out (a
+bad `sentiment` or missing field raises rather than slipping through). This is
+more robust than "please answer in JSON" prompting.
+
+```python
+class QueryAnalysis(BaseModel):
+    topics: list[str] = Field(min_length=1, max_length=5)
+    sentiment: Literal["positive", "neutral", "negative"]
+
+def analyze_query(question: str, model=None) -> QueryAnalysis:
+    model = model or get_chat_model()
+    return model.with_structured_output(QueryAnalysis).invoke(_messages(question))
+```
+
+**Without breaking the stream.** The structured object rides *alongside* the
+token stream, not inside it. `stream_agent` runs the extraction first and emits
+it as its own SSE event — `{"type":"analysis","topics":[…],"sentiment":…}` —
+before any answer tokens. The natural-language answer then streams as pure
+`token` frames, so the JSON never has to be embedded in (or parsed out of) the
+free-text stream. Extraction is best-effort: if it fails, it is logged and the
+answer still streams. The web UI renders the analysis as topic/sentiment chips
+above the answer.
+
+**Standalone route.** The same extraction is exposed at `POST /extract`, with
+FastAPI validating the response against `QueryAnalysis`:
+
+```bash
+curl -s -X POST localhost:8000/extract -H 'content-type: application/json' \
+  -d '{"message":"My RAG pipeline keeps returning irrelevant chunks and it is driving me crazy."}'
+```
+
+**Example output** (real runs, captured in
+[`logs/structured_output.log`](logs/structured_output.log) via
+`python -m src.schemas "…"`):
+
+```json
+{"topics": ["react", "pattern", "agent", "reasoning"], "sentiment": "positive"}
+{"topics": ["capital", "france"],                       "sentiment": "neutral"}
+{"topics": ["rag", "pipeline", "chunks"],               "sentiment": "negative"}
+```
+
+---
+
 ## Tests
 
 A `pytest` suite covers the central logic of each part. It tests **real logic**,
@@ -429,7 +481,7 @@ not a mocked model — the only place a model is replaced is the `/chat` transpo
 test, which stubs `stream_agent` to isolate the HTTP/SSE layer.
 
 ```bash
-uv run pytest          # all 14 tests   (or: .venv/bin/python -m pytest)
+uv run pytest          # all 19 tests   (or: .venv/bin/python -m pytest)
 uv run pytest -v       # list each test by name
 ```
 
@@ -437,15 +489,16 @@ uv run pytest -v       # list each test by name
 |---|---|---|
 | [`tests/test_rag.py`](tests/test_rag.py) | 2 | chunking, embedding normalization, cosine metric, in- vs off-corpus retrieval |
 | [`tests/test_tools.py`](tests/test_tools.py) | 3 | `rag_search` returns passages in-corpus, `NO_RELEVANT_CONTEXT` off-corpus |
-| [`tests/test_agent.py`](tests/test_agent.py) | 3 | the tool-vs-direct routing decision (`route_after_agent`) |
+| [`tests/test_agent.py`](tests/test_agent.py) | 3 | the tool-vs-direct routing decision + the raw-tool-JSON guard |
 | [`tests/test_api.py`](tests/test_api.py) | 4 | SSE framing and the `/chat` event stream (`tool_call` → `token` → `[DONE]`) |
+| [`tests/test_schemas.py`](tests/test_schemas.py) | Bonus 1 | `QueryAnalysis` schema constraints + validated extraction (stub model) |
 
 The RAG and tool tests use the real `nomic-embed-text` embedder, so Ollama must
 be running — they double as integration checks that cosine retrieval separates
 in-corpus from off-corpus queries.
 
 <details>
-<summary>What each of the 14 tests checks</summary>
+<summary>What each of the 19 tests checks</summary>
 
 **`test_rag.py`** — Part 2
 - `test_window_keeps_short_text_whole` — text under the window size stays one chunk
@@ -464,10 +517,17 @@ in-corpus from off-corpus queries.
 **`test_agent.py`** — Part 3
 - `test_routes_to_tools_when_model_emits_tool_calls` — tool calls → the `tools` node
 - `test_routes_to_end_on_a_plain_answer` — no tool calls → `END`
+- `test_guard_flags_raw_tool_call_json` — raw tool-call JSON is detected as the failure mode
+- `test_guard_leaves_natural_answers_alone` — a normal answer is not misflagged
 
 **`test_api.py`** — Part 4
 - `test_format_sse_is_valid_json_frame` — each frame is `data: {json}\n\n`
 - `test_chat_streams_events_then_done` — `/chat` streams events and ends with `[DONE]`
+
+**`test_schemas.py`** — Bonus 1
+- `test_sentiment_is_constrained_to_the_enum` — `sentiment` outside the enum is rejected
+- `test_topics_must_be_non_empty_and_bounded` — `topics` must hold 1–5 items
+- `test_analyze_query_returns_validated_model` — extraction returns a parsed `QueryAnalysis`
 </details>
 
 ---
@@ -490,15 +550,18 @@ agentic-edge-stack/
 │   ├── tools.py              # Part 3: rag_search tool (+ relevance fallback)
 │   ├── llm.py                # Part 3/4: ChatOllama wrapper from config
 │   ├── agent.py              # Part 3: LangGraph tool-calling agent + trace
-│   ├── api.py                # Part 4: FastAPI /chat (SSE) + web UI at /
+│   ├── schemas.py            # Bonus 1: Pydantic QueryAnalysis + structured extraction
+│   ├── api.py                # Part 4: FastAPI /chat (SSE) + /extract + web UI at /
 │   └── web/index.html        # Part 4 (bonus): minimal streaming chat web UI
 ├── tests/                    # pytest suite — one file per part with core logic
 │   ├── test_rag.py           # Part 2
 │   ├── test_tools.py         # Part 3
 │   ├── test_agent.py         # Part 3
-│   └── test_api.py           # Part 4
+│   ├── test_api.py           # Part 4
+│   └── test_schemas.py       # Bonus 1
 └── logs/
     ├── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
     ├── agent_trace.log       # Part 3 deliverable: agent interaction trace
-    └── chat_stream.log       # Part 4 deliverable: captured /chat SSE stream
+    ├── chat_stream.log       # Part 4 deliverable: captured /chat SSE stream
+    └── structured_output.log # Bonus 1 deliverable: schema-valid extraction examples
 ```

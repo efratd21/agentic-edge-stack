@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from .agent import stream_agent
 from .config import settings
+from .schemas import QueryAnalysis, aanalyze_query
 
 app = FastAPI(title="Agentic Edge Stack", version="0.1.0")
 
@@ -48,6 +49,17 @@ def format_sse(event: dict) -> str:
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "model": settings.model_name}
+
+
+@app.post("/extract", response_model=QueryAnalysis)
+async def extract(body: ChatRequest) -> QueryAnalysis:
+    """Bonus 1 — return a strict, schema-validated {topics, sentiment} object.
+
+    This is the same structured extraction that /chat emits as its `analysis`
+    SSE event, exposed on its own route so the JSON contract is easy to test.
+    FastAPI validates the response against `QueryAnalysis` before sending it.
+    """
+    return await aanalyze_query(body.message)
 
 
 @app.post("/chat")

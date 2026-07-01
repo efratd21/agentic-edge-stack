@@ -222,6 +222,19 @@ async def stream_agent(question: str, agent=None):
     _trace("=" * 70)
     _trace(f"USER (stream): {question}")
 
+    # Bonus 1: structured extraction, emitted as its OWN event before any tokens.
+    # It rides alongside the stream, not inside it, so the answer stays pure text.
+    # Best-effort: if extraction fails, we log and stream the answer anyway — it
+    # must never break the chat.
+    try:
+        from .schemas import aanalyze_query
+
+        analysis = await aanalyze_query(question)
+        _trace(f"  ANALYSIS: {analysis.model_dump()}")
+        yield {"type": "analysis", "topics": analysis.topics, "sentiment": analysis.sentiment}
+    except Exception as exc:  # noqa: BLE001 — never let analysis break the stream
+        _trace(f"  ANALYSIS skipped ({type(exc).__name__}: {exc})")
+
     # Stream tokens as they arrive — but if the answer starts with "{" hold it
     # back until we can tell whether it is a raw tool-call JSON (the small-model
     # failure mode) and, if so, replace it with a clean fallback. Natural answers

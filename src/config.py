@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     # --- Paths ---------------------------------------------------------------
     corpus_dir: str = "data/corpus"
     rag_log: str = "logs/rag_retrieval.log"
-    agent_trace_log: str = "logs/agent_trace.log"  # part 3 deliverable
+    agent_trace_log: str = "logs/agent_trace.log"          # part 3 deliverable
+    structured_output_log: str = "logs/structured_output.log"  # bonus 1 deliverable
 
 
 settings = Settings()
