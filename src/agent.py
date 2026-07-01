@@ -21,6 +21,7 @@ CLI:
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Annotated, TypedDict
@@ -41,15 +42,15 @@ from .config import settings
 
 SYSTEM_PROMPT = SystemMessage(
     content=(
-        "You are a helpful assistant with access to a tool, `rag_search`, that "
-        "searches a local knowledge base about AI agents (agent loops, tool "
-        "calling, ReAct, RAG, agent memory, multi-agent systems).\n"
+        "You are a helpful assistant with a tool, `rag_search`, that searches a "
+        "local knowledge base about AI agents (agent loops, tool calling, ReAct, "
+        "RAG, agent memory, multi-agent systems).\n"
         "- For questions about AI agents, call `rag_search` and ground your answer "
         "in the returned passages.\n"
-        "- For general questions unrelated to AI agents, answer directly from your "
-        "own knowledge WITHOUT calling the tool.\n"
-        "- If `rag_search` returns NO_RELEVANT_CONTEXT, answer directly and say the "
-        "knowledge base had nothing relevant."
+        "- For any other question, answer directly and concisely from your own "
+        "knowledge, in plain natural language.\n"
+        "- If `rag_search` returns NO_RELEVANT_CONTEXT, answer directly from your "
+        "own knowledge instead."
     )
 )
 
@@ -65,6 +66,52 @@ def route_after_agent(state: AgentState) -> str:
     """The "use a tool vs. answer directly" decision: go to `tools` if the model
     emitted tool calls, otherwise end. Module-level so it is unit-testable."""
     return "tools" if state["messages"][-1].tool_calls else END
+
+
+# Guard for a known small-model failure mode: emitting a JSON tool-call (often
+# for an invented tool) as the answer TEXT instead of natural language. A real
+# answer effectively never starts with `{"name": ...`.
+_TOOL_JSON_RE = re.compile(r'^\s*\{\s*"(?:name|tool|function|action)"\s*:', re.IGNORECASE)
+FALLBACK_ANSWER = "Sorry, I don't have information on that."
+
+
+def looks_like_tool_json(text: str) -> bool:
+    return bool(_TOOL_JSON_RE.match(text or ""))
+
+
+def _plain_messages(question: str) -> list[BaseMessage]:
+    return [
+        SystemMessage(
+            content="Answer the question directly in plain, natural language from "
+            "your own knowledge. Do not use tools or output JSON. If you truly don't "
+            "know, say so briefly."
+        ),
+        HumanMessage(content=question),
+    ]
+
+
+def plain_answer(question: str) -> str:
+    """Recovery path (sync, for the CLI): regenerate a direct answer with NO tools
+    bound, so the model answers in plain language instead of a tool-call JSON."""
+    from .llm import get_chat_model
+
+    text = (get_chat_model().invoke(_plain_messages(question)).content or "").strip()
+    return FALLBACK_ANSWER if (not text or looks_like_tool_json(text)) else text
+
+
+async def plain_answer_stream(question: str):
+    """Recovery path (streaming, for /chat): same as plain_answer but yields tokens
+    as they arrive, so a recovered answer still streams to the client."""
+    from .llm import get_chat_model
+
+    got = ""
+    async for chunk in get_chat_model().astream(_plain_messages(question)):
+        text = getattr(chunk, "content", "") or ""
+        if text and isinstance(chunk, AIMessageChunk):
+            got += text
+            yield text
+    if not got.strip():
+        yield FALLBACK_ANSWER
 
 
 # --------------------------------------------------------------------------- #
@@ -111,7 +158,11 @@ def build_agent(llm_with_tools, tools: list[BaseTool]):
         last = state["messages"][-1]
         outputs: list[ToolMessage] = []
         for tc in last.tool_calls:
-            result = tool_map[tc["name"]].invoke(tc["args"])
+            tool = tool_map.get(tc["name"])
+            if tool is None:  # model hallucinated a tool that doesn't exist
+                result = f"ERROR: no tool named '{tc['name']}'. Answer the user directly."
+            else:
+                result = tool.invoke(tc["args"])
             preview = str(result).replace("\n", " ")[:160]
             _trace(f"  TOOL '{tc['name']}' input={tc['args']} -> {preview!r}")
             outputs.append(
@@ -151,6 +202,8 @@ def answer(question: str, agent=None) -> str:
         config={"recursion_limit": RECURSION_LIMIT},
     )
     final = state["messages"][-1].content
+    if looks_like_tool_json(final):
+        final = plain_answer(question)
     _trace(f"FINAL: {final}")
     return final
 
@@ -169,6 +222,12 @@ async def stream_agent(question: str, agent=None):
     _trace("=" * 70)
     _trace(f"USER (stream): {question}")
 
+    # Stream tokens as they arrive — but if the answer starts with "{" hold it
+    # back until we can tell whether it is a raw tool-call JSON (the small-model
+    # failure mode) and, if so, replace it with a clean fallback. Natural answers
+    # don't start with "{", so they stream unaffected.
+    buffer, streaming = "", None  # streaming: None=undecided, True=flush freely
+
     async for mode, chunk in agent.astream(
         inputs, config=config, stream_mode=["updates", "messages"]
     ):
@@ -184,8 +243,26 @@ async def stream_agent(question: str, agent=None):
         else:  # "messages": (token_chunk, metadata)
             msg_chunk, _meta = chunk
             text = getattr(msg_chunk, "content", "") or ""
-            if text and isinstance(msg_chunk, AIMessageChunk):
+            if not (text and isinstance(msg_chunk, AIMessageChunk)):
+                continue
+            if streaming:
                 yield {"type": "token", "text": text}
+                continue
+            buffer += text
+            stripped = buffer.lstrip()
+            if stripped and stripped[0] != "{":
+                streaming = True  # a normal answer — flush and stream the rest
+                yield {"type": "token", "text": buffer}
+                buffer = ""
+
+    # Anything still buffered starts with "{": if it's a raw tool-call, recover by
+    # streaming a fresh plain answer; otherwise emit the buffered text as-is.
+    if buffer:
+        if looks_like_tool_json(buffer):
+            async for tok in plain_answer_stream(question):
+                yield {"type": "token", "text": tok}
+        else:
+            yield {"type": "token", "text": buffer}
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -344,6 +344,14 @@ below threshold (`NO_RELEVANT_CONTEXT`) and the agent fell back to a direct,
 correct answer — both the tool decision and the relevance fallback visible in one
 trace.
 
+A third safety net guards the **output**: a small model sometimes emits a JSON
+tool-call (often for a tool it invented) as its answer *text* instead of using
+the tool-calling format. When the answer starts like a raw tool-call, the agent
+regenerates it once with no tools bound (`plain_answer`) so the model replies in
+plain language — so no JSON blob ever leaks to the user, and a general question
+still gets a real answer. Natural answers (which don't start with `{`) stream
+through untouched.
+
 ---
 
 ## Part 4 — API Serving & Streaming
