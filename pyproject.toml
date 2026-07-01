@@ -1,7 +1,7 @@
 [project]
 name = "agentic-edge-stack"
 version = "0.1.0"
-description = "Add your description here"
+description = "Locally hosted agentic AI assistant: local LLM + in-memory RAG tool + tool-calling agent + streaming FastAPI."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,3 +22,12 @@ dependencies = [
     "sse-starlette>=3.4.5",
     "uvicorn[standard]>=0.49.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

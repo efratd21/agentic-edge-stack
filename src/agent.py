@@ -61,6 +61,12 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 
 
+def route_after_agent(state: AgentState) -> str:
+    """The "use a tool vs. answer directly" decision: go to `tools` if the model
+    emitted tool calls, otherwise end. Module-level so it is unit-testable."""
+    return "tools" if state["messages"][-1].tool_calls else END
+
+
 # --------------------------------------------------------------------------- #
 # Trace logging (the Part 3 deliverable)
 # --------------------------------------------------------------------------- #
@@ -113,15 +119,11 @@ def build_agent(llm_with_tools, tools: list[BaseTool]):
             )
         return {"messages": outputs}
 
-    def route(state: AgentState) -> str:
-        # The "use a tool vs. answer directly" decision.
-        return "tools" if state["messages"][-1].tool_calls else END
-
     builder = StateGraph(AgentState)
     builder.add_node("agent", agent_node)
     builder.add_node("tools", tool_node)
     builder.add_edge(START, "agent")
-    builder.add_conditional_edges("agent", route, {"tools": "tools", END: END})
+    builder.add_conditional_edges("agent", route_after_agent, {"tools": "tools", END: END})
     builder.add_edge("tools", "agent")
     return builder.compile()
 

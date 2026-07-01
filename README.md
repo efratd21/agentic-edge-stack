@@ -413,6 +413,56 @@ file — no build step and no CDN, so it works offline behind the restricted net
 
 ---
 
+## Tests
+
+A `pytest` suite covers the central logic of each part. It tests **real logic**,
+not a mocked model — the only place a model is replaced is the `/chat` transport
+test, which stubs `stream_agent` to isolate the HTTP/SSE layer.
+
+```bash
+uv run pytest          # all 14 tests   (or: .venv/bin/python -m pytest)
+uv run pytest -v       # list each test by name
+```
+
+| File | Part | Covers |
+|---|---|---|
+| [`tests/test_rag.py`](tests/test_rag.py) | 2 | chunking, embedding normalization, cosine metric, in- vs off-corpus retrieval |
+| [`tests/test_tools.py`](tests/test_tools.py) | 3 | `rag_search` returns passages in-corpus, `NO_RELEVANT_CONTEXT` off-corpus |
+| [`tests/test_agent.py`](tests/test_agent.py) | 3 | the tool-vs-direct routing decision (`route_after_agent`) |
+| [`tests/test_api.py`](tests/test_api.py) | 4 | SSE framing and the `/chat` event stream (`tool_call` → `token` → `[DONE]`) |
+
+The RAG and tool tests use the real `nomic-embed-text` embedder, so Ollama must
+be running — they double as integration checks that cosine retrieval separates
+in-corpus from off-corpus queries.
+
+<details>
+<summary>What each of the 14 tests checks</summary>
+
+**`test_rag.py`** — Part 2
+- `test_window_keeps_short_text_whole` — text under the window size stays one chunk
+- `test_window_splits_large_text_within_size` — oversized text splits into ≤-size pieces
+- `test_split_sections_on_markdown_headings` — sections split on `#`/`##` headings
+- `test_corpus_chunks_do_not_exceed_window` — no corpus chunk exceeds the window
+- `test_embeddings_normalized_and_correct_dim` — vectors are 768-dim and unit-length
+- `test_cosine_self_similarity_is_one` — a text vs itself ≈ 1.0 (the metric is cosine)
+- `test_in_corpus_scores_higher_than_off_corpus` — in-topic beats off-topic, above threshold
+- `test_search_returns_top_k` — search returns exactly top-3
+
+**`test_tools.py`** — Part 3
+- `test_in_corpus_query_returns_passages` — in-domain query returns scored passages
+- `test_off_corpus_query_returns_sentinel` — off-domain query returns `NO_RELEVANT_CONTEXT`
+
+**`test_agent.py`** — Part 3
+- `test_routes_to_tools_when_model_emits_tool_calls` — tool calls → the `tools` node
+- `test_routes_to_end_on_a_plain_answer` — no tool calls → `END`
+
+**`test_api.py`** — Part 4
+- `test_format_sse_is_valid_json_frame` — each frame is `data: {json}\n\n`
+- `test_chat_streams_events_then_done` — `/chat` streams events and ends with `[DONE]`
+</details>
+
+---
+
 ## Repository layout
 
 ```
@@ -433,6 +483,11 @@ agentic-edge-stack/
 │   ├── agent.py              # Part 3: LangGraph tool-calling agent + trace
 │   ├── api.py                # Part 4: FastAPI /chat (SSE) + web UI at /
 │   └── web/index.html        # Part 4: minimal streaming chat web UI
+├── tests/                    # pytest suite — one file per part with core logic
+│   ├── test_rag.py           # Part 2
+│   ├── test_tools.py         # Part 3
+│   ├── test_agent.py         # Part 3
+│   └── test_api.py           # Part 4
 └── logs/
     ├── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
     ├── agent_trace.log       # Part 3 deliverable: agent interaction trace
