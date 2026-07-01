@@ -344,21 +344,6 @@ below threshold (`NO_RELEVANT_CONTEXT`) and the agent fell back to a direct,
 correct answer — both the tool decision and the relevance fallback visible in one
 trace.
 
-### Routing test
-
-[`tests/test_agent_routing.py`](tests/test_agent_routing.py) verifies **both**
-branches deterministically using a stubbed chat model and the *real* retrieval
-tool, so the graph wiring is tested independently of the (non-deterministic)
-model:
-
-```
-[ok] knowledge Q invoked the tool
-[ok] knowledge Q answer is grounded
-[ok] general Q skipped the tool
-[ok] general Q answered directly
-[ok] general Q did NOT call the tool
-```
-
 ---
 
 ## Part 4 — API Serving & Streaming
@@ -403,9 +388,8 @@ data: [DONE]
 
 Under the hood, [`src/agent.py`](src/agent.py)'s `stream_agent` uses LangGraph's
 dual stream (`stream_mode=["updates","messages"]`) to yield node-level tool events
-and LLM token chunks **as they arrive**. This was verified by timing the arrival
-of each SSE frame through the streaming transport
-([`tests/stream_smoke.py`](tests/stream_smoke.py)):
+and LLM token chunks **as they arrive**. Timestamping each SSE frame as it arrives
+confirms it — tokens trickle in one at a time rather than landing all at once:
 
 ```
 + 1747.3 ms   data: {"type":"token","text":"Here"}     ← first token (model latency)
@@ -449,9 +433,6 @@ agentic-edge-stack/
 │   ├── agent.py              # Part 3: LangGraph tool-calling agent + trace
 │   ├── api.py                # Part 4: FastAPI /chat (SSE) + web UI at /
 │   └── web/index.html        # Part 4: minimal streaming chat web UI
-├── tests/
-│   ├── test_agent_routing.py # Part 3: routing test (stub model, real tool)
-│   └── stream_smoke.py       # Part 4: SSE smoke test + live UI demo (gemma3:1b)
 └── logs/
     ├── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
     ├── agent_trace.log       # Part 3 deliverable: agent interaction trace
