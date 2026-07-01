@@ -403,13 +403,14 @@ The steady ~55 ms gaps between frames are the signature of real streaming; a
 buffer-then-flush implementation would instead show one long pause and then every
 frame at once.
 
-### Web UI
+### Web UI (bonus, beyond the requirement)
 
-A minimal chat page ([`src/web/index.html`](src/web/index.html)) is served at
-`GET /`, so the "production-ready web interface" is more than `curl`: open
-`http://localhost:8000` and the answer builds up token-by-token, with a chip
-appearing when the agent searches the knowledge base. It is a single self-contained
-file — no build step and no CDN, so it works offline behind the restricted network.
+Part 4's requirement — a FastAPI `/chat` endpoint that streams over SSE — is met
+by [`src/api.py`](src/api.py) alone; `curl -N` is enough to see it. As an extra,
+a minimal chat page ([`src/web/index.html`](src/web/index.html)) is served at
+`GET /`: open `http://localhost:8000` and the answer builds up token-by-token,
+with a chip appearing when the agent searches the knowledge base. It is a single
+self-contained file — no build step and no CDN, so it works offline.
 
 ---
 
@@ -482,7 +483,7 @@ agentic-edge-stack/
 │   ├── llm.py                # Part 3/4: ChatOllama wrapper from config
 │   ├── agent.py              # Part 3: LangGraph tool-calling agent + trace
 │   ├── api.py                # Part 4: FastAPI /chat (SSE) + web UI at /
-│   └── web/index.html        # Part 4: minimal streaming chat web UI
+│   └── web/index.html        # Part 4 (bonus): minimal streaming chat web UI
 ├── tests/                    # pytest suite — one file per part with core logic
 │   ├── test_rag.py           # Part 2
 │   ├── test_tools.py         # Part 3
