@@ -474,6 +474,34 @@ curl -s -X POST localhost:8000/extract -H 'content-type: application/json' \
 
 ---
 
+## Bonus 2 — Model Quantization & Performance Profiling
+
+The serving model (`llama3.2:3b`) was profiled across quantization levels with a
+fair-comparison harness
+([`bonus/quantization/profile.py`](bonus/quantization/profile.py)): identical
+prompts and options for every level (`temperature=0, seed=0, num_predict=150,
+num_thread=10`), the cold-load warm-up discarded, and exactly one model resident
+at a time. TPS is read from Ollama's own `eval_count / eval_duration` timings;
+peak memory is the runner process's `VmHWM` — this machine is CPU-only, so that
+is peak **RAM** (on a GPU box the same column would be VRAM).
+
+| Quant level | Bits (approx) | Disk | Peak RAM | TPS (mean ± sd) | Quality (same prompts) |
+|---|---|---|---|---|---|
+| `q3_K_M` | ~3-bit | 1.7 GB | 2,169 MB | 6.6 ± 0.9 | hallucinated facts, arithmetic error |
+| `q4_K_M` | ~4-bit | 2.0 GB | 2,496 MB | 6.6 ± 0.3 | accurate on the same prompts |
+| `q8_0`   | 8-bit  | 3.4 GB | — | — | **did not load** — exceeds this machine's RAM |
+
+Two findings worth calling out: **3-bit was no faster than 4-bit** on this CPU —
+K-quant dequantization overhead cancels the memory-bandwidth saving — while its
+quality drop was immediately visible (invented facts, a wrong riddle answer);
+and **8-bit failed the more basic test**: at ~3.4 GB resident it simply does not
+fit on 4 GB-class edge hardware. On this machine `q4_K_M` strictly dominates,
+which is why it serves as the agent's brain in Parts 1–4. Full analysis and
+verbatim per-level outputs:
+[`bonus/quantization/report.md`](bonus/quantization/report.md).
+
+---
+
 ## Tests
 
 A `pytest` suite covers the central logic of each part. It tests **real logic**,
@@ -559,6 +587,8 @@ agentic-edge-stack/
 │   ├── test_agent.py         # Part 3
 │   ├── test_api.py           # Part 4
 │   └── test_schemas.py       # Bonus 1
+├── bonus/
+│   └── quantization/         # Bonus 2: profiling harness + report + raw outputs
 └── logs/
     ├── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
     ├── agent_trace.log       # Part 3 deliverable: agent interaction trace

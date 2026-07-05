@@ -1,0 +1,10 @@
+PROMPT: In two sentences, what is the capital of France and why is it famous?
+OUTPUT: The capital of France is Paris, a city renowned for its stunning architecture, art museums, fashion, cuisine, and romantic atmosphere. Paris is particularly famous for being the site of iconic landmarks such as the Eiffel Tower, Notre-Dame Cathedral, and the Louvre Museum, which houses an impressive collection of art and artifacts from around the world.
+
+PROMPT: A farmer has 17 sheep. All but 9 run away. How many are left? Explain briefly.
+OUTPUT: The question is trying to trick you, as it's phrased in a way that implies the sheep ran away. However, if we take the statement at face value and assume all but 9 of the sheep "run away" (i.e., leave), then there are still 17 sheep left.
+
+In this case, the phrase "all but 9 run away" means that 8 sheep have left, leaving 17 - 8 = 9 sheep behind.
+
+PROMPT: In 3-4 sentences, explain the ReAct pattern used by AI agents.
+OUTPUT: The React pattern is a behavioral design pattern used in artificial intelligence (AI) to create reactive systems that respond to changing environments and inputs. In an AI agent, the React pattern involves breaking down the system into smaller, independent components called "reactors" or "handlers," each responsible for processing specific types of input or events. When an event occurs, the corresponding reactor is triggered, allowing the agent to react accordingly and adapt to the new situation. This modular approach enables the AI agent to handle a wide range of inputs and scenarios in a flexible and efficient manner.
