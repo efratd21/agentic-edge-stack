@@ -605,7 +605,7 @@ agentic-edge-stack/
 
 ## A note on tooling
 
-This project was developed with AI-assisted pair programming (Claude Code),
-which is part of my day-to-day engineering workflow. Every architecture
-decision and trade-off documented above went through my review, and all
-committed logs and traces were captured from real runs on my machine.
+This project was developed using Claude Code as an AI development assistant,
+which is part of my day-to-day engineering workflow. I designed, reviewed, and
+validated all architectural decisions and implementation trade-offs. All
+committed logs and traces were generated from real runs on my machine.
