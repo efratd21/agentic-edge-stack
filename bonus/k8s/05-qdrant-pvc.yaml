@@ -1,0 +1,19 @@
+# Bonus 3 — persistent storage for Qdrant's data.
+#
+# A standalone PersistentVolumeClaim (rather than a StatefulSet's
+# volumeClaimTemplates) keeps the Deployment simple while still giving the
+# vector DB durable storage: the collection survives pod restarts and rescheduling.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qdrant-storage
+  namespace: agentic-edge
+  labels:
+    app: qdrant
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+  # No storageClassName → uses the cluster default (Docker Desktop ships a
+  # `hostpath` provisioner, so the claim binds automatically).

@@ -1,0 +1,25 @@
+# Bonus 3 — stable in-cluster address for Qdrant.
+#
+# A ClusterIP service gives Qdrant a DNS name inside the cluster
+# (`qdrant.agentic-edge.svc.cluster.local`), which is what an in-cluster client
+# would use. The RAG app in this project runs on the *host*, so it reaches the
+# same service through `kubectl port-forward` (see bonus/k8s/README.md) — no
+# NodePort or LoadBalancer needed, and nothing is exposed outside the machine.
+apiVersion: v1
+kind: Service
+metadata:
+  name: qdrant
+  namespace: agentic-edge
+  labels:
+    app: qdrant
+spec:
+  type: ClusterIP
+  selector:
+    app: qdrant
+  ports:
+    - name: rest
+      port: 6333
+      targetPort: rest
+    - name: grpc
+      port: 6334
+      targetPort: grpc

@@ -507,6 +507,55 @@ verbatim per-level outputs:
 
 ---
 
+## Bonus 3 — Production-Grade Vector DB on Kubernetes
+
+The in-memory FAISS store is swapped for a **standalone Qdrant** deployed on a
+local Kubernetes cluster (Docker Desktop Kubernetes; any k3s/kind/minikube works
+the same). Manifests live in [`bonus/k8s/`](bonus/k8s/):
+
+| Manifest | What it declares |
+|---|---|
+| [`00-namespace.yaml`](bonus/k8s/00-namespace.yaml) | `agentic-edge` namespace, so the whole stack tears down as a unit |
+| [`05-qdrant-pvc.yaml`](bonus/k8s/05-qdrant-pvc.yaml) | PersistentVolumeClaim: the vector data survives pod restarts |
+| [`10-qdrant-deployment.yaml`](bonus/k8s/10-qdrant-deployment.yaml) | Qdrant Deployment (readiness/liveness probes, resource limits, `strategy: Recreate` for the RWO volume) |
+| [`20-qdrant-service.yaml`](bonus/k8s/20-qdrant-service.yaml) | ClusterIP Service `qdrant` (6333 REST / 6334 gRPC) |
+
+The **updated configuration pointing to the K8s service** is `qdrant_url` /
+`qdrant_collection` in [`src/config.py`](src/config.py) (the host reaches the
+in-cluster Service via `kubectl port-forward svc/qdrant 6333:6333`).
+[`bonus/k8s/rag_qdrant.py`](bonus/k8s/rag_qdrant.py) is a drop-in counterpart to
+`src/rag.py`: it reuses the same corpus loading, chunking and `nomic-embed-text`
+embeddings, and only swaps where the vectors live.
+
+Run it (any local Kubernetes works: Docker Desktop K8s, kind, minikube, k3s;
+Ollama must be running for the embeddings):
+
+```bash
+kubectl apply -f bonus/k8s/
+kubectl -n agentic-edge rollout status deployment/qdrant --timeout=120s
+
+# bridge the in-cluster service to the host, then build the collection and query it
+kubectl -n agentic-edge port-forward svc/qdrant 6333:6333 &
+python bonus/k8s/rag_qdrant.py --build
+python bonus/k8s/rag_qdrant.py "how does an agent decide to use a tool?"
+```
+
+While the port-forward is open you can also browse the data visually at
+<http://localhost:6333/dashboard> (collection `agent_corpus`, 20 points, chunk
+text in the payload). Detailed steps, self-verification and teardown:
+[`bonus/k8s/README.md`](bonus/k8s/README.md).
+
+The captured run in [`logs/qdrant_retrieval.log`](logs/qdrant_retrieval.log)
+shows the full lifecycle: `kubectl apply` → rollout → collection build (20
+points, 768-dim, cosine) → a top-3 query returning the **same chunks at the same
+scores** as the FAISS path (0.808 for the tool-decision query) → and a
+**persistence check**: the pod is deleted, the Deployment reschedules it, and
+the collection answers again *without rebuilding*, proving the data lives on
+the PVC and not in the pod. Step-by-step instructions:
+[`bonus/k8s/README.md`](bonus/k8s/README.md).
+
+---
+
 ## Tests
 
 A `pytest` suite covers the central logic of each part. It tests **real logic**,
@@ -593,12 +642,14 @@ agentic-edge-stack/
 │   ├── test_api.py           # Part 4
 │   └── test_schemas.py       # Bonus 1
 ├── bonus/
-│   └── quantization/         # Bonus 2: profiling harness + report + raw outputs
+│   ├── quantization/         # Bonus 2: profiling harness + report + raw outputs
+│   └── k8s/                  # Bonus 3: Qdrant manifests + rag_qdrant.py + steps
 └── logs/
     ├── rag_retrieval.log     # Part 2 deliverable: query → retrieved chunks
     ├── agent_trace.log       # Part 3 deliverable: agent interaction trace
     ├── chat_stream.log       # Part 4 deliverable: captured /chat SSE stream
-    └── structured_output.log # Bonus 1 deliverable: schema-valid extraction examples
+    ├── structured_output.log # Bonus 1 deliverable: schema-valid extraction examples
+    └── qdrant_retrieval.log  # Bonus 3 deliverable: K8s deploy + Qdrant retrieval run
 ```
 
 ---

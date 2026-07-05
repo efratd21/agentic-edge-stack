@@ -1,0 +1,8 @@
+# Bonus 3 — a dedicated namespace so the whole Qdrant deployment can be
+# inspected or torn down as a unit (`kubectl delete ns agentic-edge`).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentic-edge
+  labels:
+    app.kubernetes.io/part-of: agentic-edge-stack

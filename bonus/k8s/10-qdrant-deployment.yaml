@@ -1,0 +1,68 @@
+# Bonus 3 — Qdrant deployed on Kubernetes, backed by a PersistentVolumeClaim.
+#
+# A Deployment (single replica) mounting the qdrant-storage PVC: simpler than a
+# StatefulSet but still "production-grade" in the sense that matters here — the
+# vector data is persisted and survives pod restarts.
+#
+# strategy: Recreate — the PVC is ReadWriteOnce, so we must tear down the old pod
+# before starting the new one; a rolling update would deadlock two pods on the
+# same volume.
+#
+# imagePullPolicy: IfNotPresent — this network (NetFree) blocks the Docker Hub
+# blob CDN, so the cluster uses the image already cached locally
+# (`qdrant/qdrant:latest`) and never attempts a pull. On an unrestricted network
+# you would pin an explicit version tag (e.g. qdrant/qdrant:v1.12.4) instead.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qdrant
+  namespace: agentic-edge
+  labels:
+    app: qdrant
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qdrant
+  template:
+    metadata:
+      labels:
+        app: qdrant
+    spec:
+      containers:
+        - name: qdrant
+          image: qdrant/qdrant:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: rest
+              containerPort: 6333   # REST + web dashboard
+            - name: grpc
+              containerPort: 6334   # gRPC API
+          volumeMounts:
+            - name: storage
+              mountPath: /qdrant/storage   # Qdrant's default data dir
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: rest
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: rest
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: qdrant-storage

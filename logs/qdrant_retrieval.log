@@ -1,0 +1,73 @@
+# Bonus 3 deliverable: Qdrant-on-Kubernetes deployment + retrieval, captured verbatim.
+# Cluster: Docker Desktop Kubernetes v1.30.5 (local). Steps: bonus/k8s/README.md.
+
+$ kubectl apply -f bonus/k8s/
+namespace/agentic-edge created
+persistentvolumeclaim/qdrant-storage created
+deployment.apps/qdrant created
+service/qdrant created
+
+$ kubectl -n agentic-edge rollout status deployment/qdrant --timeout=120s
+Waiting for deployment "qdrant" rollout to finish: 0 of 1 updated replicas are available...
+deployment "qdrant" successfully rolled out
+
+$ kubectl -n agentic-edge get pods,svc,pvc
+NAME                          READY   STATUS    RESTARTS   AGE
+pod/qdrant-76f5689db4-x77gj   1/1     Running   0          12s
+
+NAME             TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
+service/qdrant   ClusterIP   10.104.163.107   <none>        6333/TCP,6334/TCP   12s
+
+NAME                                   STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+persistentvolumeclaim/qdrant-storage   Bound    pvc-8f1ac785-fe70-4d17-b0a3-12af4771525f   1Gi        RWO            hostpath       <unset>                 12s
+
+$ kubectl -n agentic-edge port-forward svc/qdrant 6333:6333 &
+$ curl -s localhost:6333/readyz
+all shards are ready
+
+$ python bonus/k8s/rag_qdrant.py --build
+Building Qdrant collection 'agent_corpus' at http://localhost:6333 …
+OK — 20 points, dim=768, cosine.
+
+$ python bonus/k8s/rag_qdrant.py "how does an agent decide to use a tool?"
+
+QUERY: "how does an agent decide to use a tool?"  (top-3 from Qdrant)
+
+  #1  score=0.808  02-agent-loop-and-reasoning.md § Deciding to use a tool vs. answering directly
+      A key behavior of a well-built agent is **knowing when *not* to act**. For a
+general-knowledge question the model should answer directly from its own
+parameters; for a question about private or domain-specific data it should call a
+retrieval tool. Forcing a tool call on every turn wastes latency and...
+
+  #2  score=0.782  03-tool-calling.md § How it works
+      The developer describes each tool with a name, a natural-language description,
+and a JSON Schema for its parameters. These descriptions are passed to the model
+alongside the user's message. When the model decides a tool is needed, instead of
+emitting prose it emits a structured tool call:
+
+  #3  score=0.773  02-agent-loop-and-reasoning.md § The Agent Loop and Reasoning Patterns
+      The heart of an agent is its **control loop**. On each iteration the model is
+given the goal, the history so far, and the set of available tools. It responds
+either with a tool call or with a final answer. If it calls a tool, the harness
+executes the tool, appends the result to the history, and loop...
+
+# Persistence check: delete the pod, let the Deployment reschedule it, then query
+# again WITHOUT rebuilding. The collection survives on the PersistentVolumeClaim.
+
+$ kubectl -n agentic-edge delete pod -l app=qdrant
+pod "qdrant-76f5689db4-x77gj" deleted
+$ kubectl -n agentic-edge rollout status deployment/qdrant --timeout=90s
+deployment "qdrant" successfully rolled out
+
+$ python bonus/k8s/rag_qdrant.py "what is the ReAct pattern?"
+
+QUERY: "what is the ReAct pattern?"  (top-3 from Qdrant)
+
+  #1  score=0.739  02-agent-loop-and-reasoning.md § ReAct: reason + act
+      The most influential agent pattern is **ReAct** (Reasoning + Acting). The model
+interleaves *thoughts* (free-text reasoning about what to do next) with *actions*
+(tool calls). A ReAct trace looks like:
+
+$ kubectl -n agentic-edge get pods
+NAME                      READY   STATUS    RESTARTS   AGE
+qdrant-76f5689db4-g7hx5   1/1     Running   0          16s

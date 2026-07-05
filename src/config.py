@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # agent falls back to a direct answer (in-corpus ~0.81 vs off-corpus ~0.48).
     relevance_threshold: float = 0.6
 
+    # --- Qdrant (bonus 3: vector DB on Kubernetes) ---------------------------
+    # The RAG app runs on the host and reaches the in-cluster Qdrant via
+    # `kubectl port-forward svc/qdrant 6333:6333` (see bonus/k8s/README.md).
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_collection: str = "agent_corpus"
+
     # --- Paths ---------------------------------------------------------------
     corpus_dir: str = "data/corpus"
     rag_log: str = "logs/rag_retrieval.log"
