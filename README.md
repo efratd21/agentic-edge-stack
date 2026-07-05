@@ -50,22 +50,22 @@ The retrieval engine at the bottom (Part 2) is exposed to the agent as the
 | Concern | Choice | Why |
 |---|---|---|
 | Inference engine | **Ollama** | One-command model pull, OpenAI-compatible API, native tool-calling, serves both the LLM and the embedder from one stack. |
-| LLM | **`llama3.2:3b`** | Lightweight, instruct-tuned, **tool-calling capable** (required by the Part 3 agent). See [why](#why-llama32-3b-for-the-agent). |
-| Embeddings | **`nomic-embed-text`** (via Ollama) | 768-dim, instruction-tuned. Served by the *same* Ollama engine as the LLM — no separate torch/HuggingFace stack at runtime. See [why](#why-nomic-embed-text-for-embeddings). |
+| LLM | **`llama3.2:3b`** | Lightweight, instruct-tuned, **tool-calling capable** (required by the Part 3 agent). See [why](#why-llama323b-for-the-agent). |
+| Embeddings | **`nomic-embed-text`** (via Ollama) | 768-dim, instruction-tuned. Served by the *same* Ollama engine as the LLM, so there is no separate torch/HuggingFace stack at runtime. See [why](#why-nomic-embed-text-for-embeddings). |
 | Vector store | **FAISS** `IndexFlatIP` + L2-normalized vectors | In-memory, deterministic, zero external deps. Inner product over unit vectors == **cosine similarity**. |
 | Config | **pydantic-settings** + `.env` | No hardcoded hosts or magic numbers; every tunable is typed and overridable. |
-| Host environment | **WSL2 (Ubuntu)** on Windows | Ollama, FAISS and k3s behave far more predictably on Linux. |
+| Host environment | Linux / macOS (**WSL2 Ubuntu** on Windows) | Ollama and FAISS behave far more predictably on Linux than on Windows-native. |
 
 ### Why `nomic-embed-text` for embeddings
 
 The assignment suggests `all-MiniLM-L6-v2` / `bge-small-en-v1.5`, which run on a
-separate sentence-transformers (PyTorch + HuggingFace) stack. We deliberately use
+separate sentence-transformers (PyTorch + HuggingFace) stack. I deliberately use
 **`nomic-embed-text` served by Ollama** so that **a single inference engine
-serves both the LLM and the embedder** — the essence of a self-contained "edge
-stack". Concretely:
+serves both the LLM and the embedder**, which is the essence of a self-contained
+"edge stack". Concretely:
 
 - **One runtime, not two.** No second PyTorch/HuggingFace dependency, no separate
-  model download or cache, no device/CUDA juggling — just `ollama pull`.
+  model download or cache, no device/CUDA juggling. A single `ollama pull` covers it.
 - **Reproducibility.** A reviewer on a fresh machine gets a working system from
   the model pull alone; nothing is fetched at query time.
 - **Consistency.** Embeddings and chat share one client, host and
@@ -75,10 +75,10 @@ stack". Concretely:
   retrieval.
 
 (MiniLM was also blocked on the development network, which first surfaced the
-question — but the decision stands on the architectural merits above.)
+question, but the decision stands on the architectural merits above.)
 
-`nomic-embed-text` is instruction-tuned and **requires task prefixes** —
-`search_document:` for stored passages, `search_query:` for queries — which the
+`nomic-embed-text` is instruction-tuned and **requires task prefixes**
+(`search_document:` for stored passages, `search_query:` for queries), which the
 pipeline applies automatically.
 
 ---
@@ -91,23 +91,28 @@ scripts cover bringing the server up and proving it answers.
 
 ### Environment & prerequisites
 
-All commands assume a **WSL2 (Ubuntu)** shell on Windows. This is a deliberate
-choice: Ollama, FAISS and (for the K8s bonus) k3s all behave far more predictably
-on Linux than on Windows-native. Where a command differs, a `> Windows-native:`
-note is given.
+All commands run in any **Linux or macOS** shell. On Windows, use **WSL2
+(Ubuntu)**: this project was developed there, since Ollama and FAISS behave far
+more predictably on Linux than on Windows-native. Where a command differs, a
+`> Windows-native:` note is given.
 
-- **[Ollama](https://ollama.com)** — the local inference server. Install with
+- **[Ollama](https://ollama.com)**: the local inference server. Install with
   `curl -fsSL https://ollama.com/install.sh | sh`
   (`deploy.sh` checks for it and prints this hint if missing).
   > Windows-native: download the installer from <https://ollama.com/download>.
-- **[`uv`](https://github.com/astral-sh/uv)** — Python environment / dependency
-  manager. Create the virtualenv from the lockfile:
+- **[`uv`](https://github.com/astral-sh/uv)**: Python environment / dependency
+  manager. Install with `curl -LsSf https://astral.sh/uv/install.sh | sh`, then
+  create the virtualenv from the lockfile and activate it:
 
   ```bash
-  uv sync            # creates .venv from pyproject.toml / uv.lock
+  uv sync                      # creates .venv from pyproject.toml / uv.lock
+  source .venv/bin/activate    # every `python ...` command below assumes this
   ```
 
-- **Config (optional)** — defaults work out of the box; override via `.env`:
+  (Prefer not to activate? Prefix commands with `uv run` instead, e.g.
+  `uv run python -m src.rag "..."`.)
+
+- **Config (optional)**: defaults work out of the box; override via `.env`:
 
   ```bash
   cp .env.example .env
@@ -117,7 +122,7 @@ note is given.
 
 [`scripts/deploy.sh`](scripts/deploy.sh) starts Ollama (if it is not already
 running) and pulls the chat and embedding models named in `.env` (or their
-defaults). It is **idempotent** — safe to re-run.
+defaults). It is **idempotent** and safe to re-run.
 
 ```bash
 ./scripts/deploy.sh
@@ -142,7 +147,7 @@ Next: python scripts/verify.py
 ### Verify ("Hello World")
 
 [`scripts/verify.py`](scripts/verify.py) confirms the server is up and that
-**both** models the stack relies on actually respond — the chat model (the
+**both** models the stack relies on actually respond: the chat model (the
 "Hello World") **and** the embedder (a 768-dim vector, used by Part 2). It exits
 non-zero on the first failure, so it doubles as a health check. Host, model and
 embedding dimension are read from the shared `src/config.py`:
@@ -161,7 +166,7 @@ All checks passed — Part 1 endpoint is healthy.
 
 <sub>Only the chat "Hello World" is strictly required by Part 1; the embedder
 check is added because `deploy.sh` pulls both models and Part 2 depends on the
-embedder. The greeting wording varies between runs — generation is
+embedder. The greeting wording varies between runs because generation is
 non-deterministic.</sub>
 
 ---
@@ -193,19 +198,19 @@ the capital of France?"*) cleanly exercises the **direct-answer** fallback.
 The full implementation is in [`src/rag.py`](src/rag.py); configuration in
 [`src/config.py`](src/config.py).
 
-1. **Load & chunk** — every `.md` file is split **on Markdown headings first**,
+1. **Load & chunk**: every `.md` file is split **on Markdown headings first**,
    so each chunk stays topically coherent; an oversized section falls back to a
    fixed character window (`1800` chars, `200` overlap ≈ 450/50 tokens). For this
    corpus every section fits in one chunk, so **no chunk is split mid-sentence**
    (20 chunks, max 1198 chars). Each chunk keeps its `source` file and `section`
    heading for the log.
-2. **Embed** — each text is sent to `nomic-embed-text` via Ollama with the
+2. **Embed**: each text is sent to `nomic-embed-text` via Ollama with the
    required prefix (`search_document:` for chunks, `search_query:` for queries),
    then **L2-normalized**.
-3. **Index** — vectors are added to `faiss.IndexFlatIP(768)`. Because the vectors
+3. **Index**: vectors are added to `faiss.IndexFlatIP(768)`. Because the vectors
    are unit-length, inner product **is** cosine similarity. The index is built
    **once** at startup, not per query.
-4. **Search** — the query is embedded and the index returns the **top-3** chunks
+4. **Search**: the query is embedded and the index returns the **top-3** chunks
    with their cosine scores and provenance.
 
 ### Running it
@@ -233,8 +238,8 @@ Built index over 20 chunks; top-3:
 
 The full captured log is committed at
 [`logs/rag_retrieval.log`](logs/rag_retrieval.log). It contains three
-representative queries — one clearly in-corpus, one borderline, one out-of-corpus
-— each with the chunks retrieved from memory:
+representative queries (one clearly in-corpus, one borderline, one
+out-of-corpus), each with the chunks retrieved from memory:
 
 | Query | Type | Top-1 result | Top score |
 |---|---|---|---|
@@ -288,27 +293,27 @@ Code: [`src/agent.py`](src/agent.py) (graph + trace), [`src/tools.py`](src/tools
 
 ### Why LangGraph (and not a hand-rolled loop or LangChain)
 
-The assignment lists *"LangChain or LangGraph (or build a native loop)"*. We chose
+The assignment lists *"LangChain or LangGraph (or build a native loop)"*. I chose
 **LangGraph**: a conditional-edge graph is the most readable expression of this
 exact tool-vs-direct decision, and LangGraph is the current standard for agentic
 orchestration (LangChain's `AgentExecutor` is legacy). The graph is deliberately
-minimal — for a single tool it stays a few nodes — so it does not hide control
+minimal (for a single tool it stays a few nodes), so it does not hide control
 flow behind framework magic.
 
 ### Why `llama3.2:3b` for the agent
 
 The agent needs **native tool-calling**. `gemma3:1b` does not support tools in
 Ollama (the server returns `400 ... does not support tools`), so the chat model
-is **`llama3.2:3b`** — listed in the assignment's Part 1 model options and
-tool-capable. Only `MODEL_NAME` changes; the graph, tool and embedder are
+is **`llama3.2:3b`**, which is listed in the assignment's Part 1 model options
+and is tool-capable. Only `MODEL_NAME` changes; the graph, tool and embedder are
 unchanged.
 
 ### The tool and the fallback
 
 `rag_search`'s description names the corpus domain (AI agents) to steer the model
-toward using it for in-domain questions. But a small model is an imperfect router
-— in practice `llama3.2:3b` sometimes reaches for the tool even on a general
-question. That is exactly why there is a **second line of defence**: a relevance
+toward using it for in-domain questions. But a small model is an imperfect
+router: in practice `llama3.2:3b` sometimes reaches for the tool even on a
+general question. That is exactly why there is a **second line of defence**: a relevance
 threshold (top-1 cosine `< 0.6`, chosen from the 0.81-vs-0.48 gap measured in
 Part 2) turns a weak hit into the sentinel `NO_RELEVANT_CONTEXT`, so the agent
 falls back to a direct answer instead of grounding on an irrelevant chunk. The
@@ -322,7 +327,7 @@ python -m src.agent "What is the capital of France?"            # → falls back
 ```
 
 Every decision and tool I/O is written to
-[`logs/agent_trace.log`](logs/agent_trace.log) — the interaction-trace
+[`logs/agent_trace.log`](logs/agent_trace.log), the interaction-trace
 deliverable. The committed trace (abridged) shows both branches:
 
 ```
@@ -341,14 +346,14 @@ FINAL: The capital of France is Paris.
 
 For the general question the model *did* reach for the tool, but retrieval scored
 below threshold (`NO_RELEVANT_CONTEXT`) and the agent fell back to a direct,
-correct answer — both the tool decision and the relevance fallback visible in one
-trace.
+correct answer; both the tool decision and the relevance fallback are visible in
+one trace.
 
 A third safety net guards the **output**: a small model sometimes emits a JSON
 tool-call (often for a tool it invented) as its answer *text* instead of using
 the tool-calling format. When the answer starts like a raw tool-call, the agent
 regenerates it once with no tools bound (`plain_answer`) so the model replies in
-plain language — so no JSON blob ever leaks to the user, and a general question
+plain language. No JSON blob ever leaks to the user, and a general question
 still gets a real answer. Natural answers (which don't start with `{`) stream
 through untouched.
 
@@ -398,7 +403,7 @@ data: [DONE]
 Under the hood, [`src/agent.py`](src/agent.py)'s `stream_agent` uses LangGraph's
 dual stream (`stream_mode=["updates","messages"]`) to yield node-level tool events
 and LLM token chunks **as they arrive**. Timestamping each SSE frame as it arrives
-confirms it — tokens trickle in one at a time rather than landing all at once:
+confirms it: tokens trickle in one at a time rather than landing all at once:
 
 ```
 + 1747.3 ms   data: {"type":"token","text":"Here"}     ← first token (model latency)
@@ -414,19 +419,19 @@ frame at once.
 
 ### Web UI (bonus, beyond the requirement)
 
-Part 4's requirement — a FastAPI `/chat` endpoint that streams over SSE — is met
+Part 4's requirement (a FastAPI `/chat` endpoint that streams over SSE) is met
 by [`src/api.py`](src/api.py) alone; `curl -N` is enough to see it. As an extra,
 a minimal chat page ([`src/web/index.html`](src/web/index.html)) is served at
 `GET /`: open `http://localhost:8000` and the answer builds up token-by-token,
 with a chip appearing when the agent searches the knowledge base. It is a single
-self-contained file — no build step and no CDN, so it works offline.
+self-contained file with no build step and no CDN, so it works offline.
 
 ---
 
 ## Bonus 1 — Structured Output Responses
 
-The agent can also emit **strict, schema-validated JSON** — here, the `{topics,
-sentiment}` of the user's message — alongside its natural-language answer.
+The agent can also emit **strict, schema-validated JSON** (here, the `{topics,
+sentiment}` of the user's message) alongside its natural-language answer.
 
 **How the schema is enforced.** [`src/schemas.py`](src/schemas.py) defines a
 Pydantic v2 model and hands it to `ChatOllama.with_structured_output(...)`, which
@@ -447,7 +452,7 @@ def analyze_query(question: str, model=None) -> QueryAnalysis:
 
 **Without breaking the stream.** The structured object rides *alongside* the
 token stream, not inside it. `stream_agent` runs the extraction first and emits
-it as its own SSE event — `{"type":"analysis","topics":[…],"sentiment":…}` —
+it as its own SSE event, `{"type":"analysis","topics":[…],"sentiment":…}`,
 before any answer tokens. The natural-language answer then streams as pure
 `token` frames, so the JSON never has to be embedded in (or parsed out of) the
 free-text stream. Extraction is best-effort: if it fails, it is logged and the
@@ -482,17 +487,17 @@ fair-comparison harness
 prompts and options for every level (`temperature=0, seed=0, num_predict=150,
 num_thread=10`), the cold-load warm-up discarded, and exactly one model resident
 at a time. TPS is read from Ollama's own `eval_count / eval_duration` timings;
-peak memory is the runner process's `VmHWM` — this machine is CPU-only, so that
+peak memory is the runner process's `VmHWM`. This machine is CPU-only, so that
 is peak **RAM** (on a GPU box the same column would be VRAM).
 
 | Quant level | Bits (approx) | Disk | Peak RAM | TPS (mean ± sd) | Quality (same prompts) |
 |---|---|---|---|---|---|
 | `q3_K_M` | ~3-bit | 1.7 GB | 2,169 MB | 6.6 ± 0.9 | hallucinated facts, arithmetic error |
 | `q4_K_M` | ~4-bit | 2.0 GB | 2,496 MB | 6.6 ± 0.3 | accurate on the same prompts |
-| `q8_0`   | 8-bit  | 3.4 GB | — | — | **did not load** — exceeds this machine's RAM |
+| `q8_0`   | 8-bit  | 3.4 GB | — | — | **did not load**: exceeds this machine's RAM |
 
-Two findings worth calling out: **3-bit was no faster than 4-bit** on this CPU —
-K-quant dequantization overhead cancels the memory-bandwidth saving — while its
+Two findings worth calling out: **3-bit was no faster than 4-bit** on this CPU
+(K-quant dequantization overhead cancels the memory-bandwidth saving), while its
 quality drop was immediately visible (invented facts, a wrong riddle answer);
 and **8-bit failed the more basic test**: at ~3.4 GB resident it simply does not
 fit on 4 GB-class edge hardware. On this machine `q4_K_M` strictly dominates,
@@ -505,7 +510,7 @@ verbatim per-level outputs:
 ## Tests
 
 A `pytest` suite covers the central logic of each part. It tests **real logic**,
-not a mocked model — the only place a model is replaced is the `/chat` transport
+not a mocked model; the only place a model is replaced is the `/chat` transport
 test, which stubs `stream_agent` to isolate the HTTP/SSE layer.
 
 ```bash
@@ -522,40 +527,40 @@ uv run pytest -v       # list each test by name
 | [`tests/test_schemas.py`](tests/test_schemas.py) | Bonus 1 | `QueryAnalysis` schema constraints + validated extraction (stub model) |
 
 The RAG and tool tests use the real `nomic-embed-text` embedder, so Ollama must
-be running — they double as integration checks that cosine retrieval separates
+be running; they double as integration checks that cosine retrieval separates
 in-corpus from off-corpus queries.
 
 <details>
 <summary>What each of the 19 tests checks</summary>
 
-**`test_rag.py`** — Part 2
-- `test_window_keeps_short_text_whole` — text under the window size stays one chunk
-- `test_window_splits_large_text_within_size` — oversized text splits into ≤-size pieces
-- `test_split_sections_on_markdown_headings` — sections split on `#`/`##` headings
-- `test_corpus_chunks_do_not_exceed_window` — no corpus chunk exceeds the window
-- `test_embeddings_normalized_and_correct_dim` — vectors are 768-dim and unit-length
-- `test_cosine_self_similarity_is_one` — a text vs itself ≈ 1.0 (the metric is cosine)
-- `test_in_corpus_scores_higher_than_off_corpus` — in-topic beats off-topic, above threshold
-- `test_search_returns_top_k` — search returns exactly top-3
+**`test_rag.py`** (Part 2)
+- `test_window_keeps_short_text_whole`: text under the window size stays one chunk
+- `test_window_splits_large_text_within_size`: oversized text splits into ≤-size pieces
+- `test_split_sections_on_markdown_headings`: sections split on `#`/`##` headings
+- `test_corpus_chunks_do_not_exceed_window`: no corpus chunk exceeds the window
+- `test_embeddings_normalized_and_correct_dim`: vectors are 768-dim and unit-length
+- `test_cosine_self_similarity_is_one`: a text vs itself ≈ 1.0 (the metric is cosine)
+- `test_in_corpus_scores_higher_than_off_corpus`: in-topic beats off-topic, above threshold
+- `test_search_returns_top_k`: search returns exactly top-3
 
-**`test_tools.py`** — Part 3
-- `test_in_corpus_query_returns_passages` — in-domain query returns scored passages
-- `test_off_corpus_query_returns_sentinel` — off-domain query returns `NO_RELEVANT_CONTEXT`
+**`test_tools.py`** (Part 3)
+- `test_in_corpus_query_returns_passages`: in-domain query returns scored passages
+- `test_off_corpus_query_returns_sentinel`: off-domain query returns `NO_RELEVANT_CONTEXT`
 
-**`test_agent.py`** — Part 3
-- `test_routes_to_tools_when_model_emits_tool_calls` — tool calls → the `tools` node
-- `test_routes_to_end_on_a_plain_answer` — no tool calls → `END`
-- `test_guard_flags_raw_tool_call_json` — raw tool-call JSON is detected as the failure mode
-- `test_guard_leaves_natural_answers_alone` — a normal answer is not misflagged
+**`test_agent.py`** (Part 3)
+- `test_routes_to_tools_when_model_emits_tool_calls`: tool calls → the `tools` node
+- `test_routes_to_end_on_a_plain_answer`: no tool calls → `END`
+- `test_guard_flags_raw_tool_call_json`: raw tool-call JSON is detected as the failure mode
+- `test_guard_leaves_natural_answers_alone`: a normal answer is not misflagged
 
-**`test_api.py`** — Part 4
-- `test_format_sse_is_valid_json_frame` — each frame is `data: {json}\n\n`
-- `test_chat_streams_events_then_done` — `/chat` streams events and ends with `[DONE]`
+**`test_api.py`** (Part 4)
+- `test_format_sse_is_valid_json_frame`: each frame is `data: {json}\n\n`
+- `test_chat_streams_events_then_done`: `/chat` streams events and ends with `[DONE]`
 
-**`test_schemas.py`** — Bonus 1
-- `test_sentiment_is_constrained_to_the_enum` — `sentiment` outside the enum is rejected
-- `test_topics_must_be_non_empty_and_bounded` — `topics` must hold 1–5 items
-- `test_analyze_query_returns_validated_model` — extraction returns a parsed `QueryAnalysis`
+**`test_schemas.py`** (Bonus 1)
+- `test_sentiment_is_constrained_to_the_enum`: `sentiment` outside the enum is rejected
+- `test_topics_must_be_non_empty_and_bounded`: `topics` must hold 1–5 items
+- `test_analyze_query_returns_validated_model`: extraction returns a parsed `QueryAnalysis`
 </details>
 
 ---
@@ -581,7 +586,7 @@ agentic-edge-stack/
 │   ├── schemas.py            # Bonus 1: Pydantic QueryAnalysis + structured extraction
 │   ├── api.py                # Part 4: FastAPI /chat (SSE) + /extract + web UI at /
 │   └── web/index.html        # Part 4 (bonus): minimal streaming chat web UI
-├── tests/                    # pytest suite — one file per part with core logic
+├── tests/                    # pytest suite: one file per part with core logic
 │   ├── test_rag.py           # Part 2
 │   ├── test_tools.py         # Part 3
 │   ├── test_agent.py         # Part 3
@@ -595,3 +600,12 @@ agentic-edge-stack/
     ├── chat_stream.log       # Part 4 deliverable: captured /chat SSE stream
     └── structured_output.log # Bonus 1 deliverable: schema-valid extraction examples
 ```
+
+---
+
+## A note on tooling
+
+This project was developed with AI-assisted pair programming (Claude Code),
+which is part of my day-to-day engineering workflow. Every architecture
+decision and trade-off documented above went through my review, and all
+committed logs and traces were captured from real runs on my machine.
